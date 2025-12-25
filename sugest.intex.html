@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Ladder Manager</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f4f8; padding: 20px; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 25px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3498db; margin-bottom: 20px; }
+        
+        form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; background: #f9f9f9; padding: 20px; border-radius: 10px; }
+        input, textarea { padding: 12px; border: 1px solid #ddd; border-radius: 6px; }
+        .full { grid-column: 1 / -1; }
+        
+        .summary { display: flex; gap: 15px; margin: 20px 0; }
+        .stat-card { flex: 1; padding: 15px; border-radius: 8px; color: white; text-align: center; }
+        .bg-blue { background: #3498db; }
+        .bg-green { background: #27ae60; }
+
+        button { padding: 12px; cursor: pointer; border: none; border-radius: 6px; font-weight: bold; }
+        #saveBtn { background: #3498db; color: white; grid-column: span 2; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { background: #34495e; color: white; padding: 12px; text-align: left; }
+        td { padding: 12px; border-bottom: 1px solid #eee; }
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .pending { background: #ffeaa7; color: #d35400; }
+        .returned { background: #55efc4; color: #00b894; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>Ladder Lending Cloud</h2>
+        <input type="text" id="searchInput" placeholder="Search Mobile..." onkeyup="search()">
+    </div>
+
+    <div class="summary">
+        <div class="stat-card bg-blue">Records: <span id="count">0</span></div>
+        <div class="stat-card bg-green">Earnings: ?<span id="earnings">0</span></div>
+    </div>
+
+    <form id="lendingForm">
+        <input type="hidden" id="recordId">
+        <input type="text" id="ladderLender" placeholder="Item Name" required>
+        <input type="text" id="lenderName" placeholder="Customer Name" required>
+        <input type="tel" id="mobile" placeholder="Mobile Number" required>
+        <input type="date" id="startDate" required onchange="updateCalc()">
+        <input type="date" id="returnDate" placeholder="Return Date" onchange="updateCalc()">
+        <input type="text" id="costDisplay" placeholder="Cost: ?0" readonly>
+        <textarea id="address" class="full" placeholder="Address"></textarea>
+        <button type="submit" id="saveBtn">Save to Cloud</button>
+    </form>
+
+    <table id="recordsTable">
+        <thead>
+            <tr>
+                <th>Customer</th>
+                <th>Item</th>
+                <th>Dates</th>
+                <th>Status</th>
+                <th>Total Cost</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+    </table>
+</div>
+
+<script>
+    // 1. CONFIGURE FIREBASE (Replace with your actual keys)
+    const firebaseConfig = {
+        apiKey: "AIzaSyBMqkgaRe__tWeqeCSPnBEr1ba4JcsA3L0",
+        authDomain: "shivansh-ladder-lending.firebaseapp.com",
+        databaseURL: "https://shivansh-ladder-lending-default-rtdb.firebaseio.com",
+        projectId: "shivansh-ladder-lending",
+        storageBucket: "shivansh-ladder-lending.firebasestorage.app",
+        messagingSenderId: "1089316866992",
+        appId: "1:1089316866992:web:eda68585ecfe4c6e932475"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+    const recordsRef = database.ref('lending_data');
+
+    const RATE = 30;
+
+    // Calculation Logic
+    function updateCalc() {
+        const s = document.getElementById('startDate').value;
+        const e = document.getElementById('returnDate').value;
+        if(s && e) {
+            const days = Math.ceil(Math.abs(new Date(e) - new Date(s)) / (1000*60*60*24));
+            document.getElementById('costDisplay').value = "?" + (days * RATE);
+        }
+    }
+
+    // Save/Update to Cloud
+    document.getElementById('lendingForm').onsubmit = function(e) {
+        e.preventDefault();
+        const id = document.getElementById('recordId').value;
+        const s = document.getElementById('startDate').value;
+        const eDate = document.getElementById('returnDate').value;
+        let days = 0;
+        if(s && eDate) days = Math.ceil(Math.abs(new Date(eDate) - new Date(s)) / (1000*60*60*24));
+
+        const entry = {
+            ladderLender: document.getElementById('ladderLender').value,
+            lenderName: document.getElementById('lenderName').value,
+            mobile: document.getElementById('mobile').value,
+            startDate: s,
+            returnDate: eDate || "",
+            noOfDays: days,
+            address: document.getElementById('address').value
+        };
+
+        if(id === "") recordsRef.push(entry);
+        else database.ref('lending_data/' + id).set(entry).then(() => {
+            document.getElementById('recordId').value = "";
+            document.getElementById('saveBtn').innerText = "Save to Cloud";
+        });
+
+        this.reset();
+    };
+
+    // Live Data Listener
+    recordsRef.on('value', (snap) => {
+        const data = snap.val();
+        const body = document.getElementById('tableBody');
+        body.innerHTML = '';
+        let totalCash = 0;
+        let count = 0;
+
+        if(data) {
+            Object.keys(data).forEach(key => {
+                const r = data[key];
+                const isRet = r.returnDate !== "";
+                const cost = isRet ? (r.noOfDays * RATE) : 0;
+                if(isRet) totalCash += cost;
+                count++;
+
+                body.innerHTML += `
+                    <tr>
+                        <td>${r.lenderName}<br><small>${r.mobile}</small></td>
+                        <td>${r.ladderLender}</td>
+                        <td>${r.startDate} to ${isRet ? r.returnDate : '---'}</td>
+                        <td><span class="status-badge ${isRet ? 'returned' : 'pending'}">${isRet ? 'Returned' : 'Pending'}</span></td>
+                        <td>?${cost}</td>
+                        <td><button onclick="editRec('${key}')">Edit</button></td>
+                    </tr>`;
+            });
+        }
+        document.getElementById('count').innerText = count;
+        document.getElementById('earnings').innerText = totalCash;
+    });
+
+    function editRec(key) {
+        database.ref('lending_data/' + key).once('value', (snap) => {
+            const r = snap.val();
+            document.getElementById('ladderLender').value = r.ladderLender;
+            document.getElementById('lenderName').value = r.lenderName;
+            document.getElementById('mobile').value = r.mobile;
+            document.getElementById('startDate').value = r.startDate;
+            document.getElementById('returnDate').value = r.returnDate;
+            document.getElementById('address').value = r.address;
+            document.getElementById('recordId').value = key;
+            document.getElementById('saveBtn').innerText = "Update Cloud Record";
+            updateCalc();
+            window.scrollTo(0,0);
+        });
+    }
+
+    function search() {
+        const filter = document.getElementById('searchInput').value.toUpperCase();
+        const rows = document.getElementById('tableBody').getElementsByTagName('tr');
+        for (let i = 0; i < rows.length; i++) {
+            const txt = rows[i].innerText || rows[i].textContent;
+            rows[i].style.display = txt.toUpperCase().indexOf(filter) > -1 ? "" : "none";
+        }
+    }
+</script>
+
+</body>
+</html>
